@@ -3,6 +3,7 @@
 #include <ResonantFilter.h>
 #include <StateVariable.h>
 #include <mozzi_rand.h>
+#include <ADSR.h>
 
 #include <EventDelay.h>
 
@@ -13,7 +14,7 @@
 
 
 #undef CONTROL_RATE
-#define CONTROL_RATE 64
+#define CONTROL_RATE 32
 
 const uint8_t POT_1 = A3;
 const uint8_t POT_2 = A2;
@@ -26,6 +27,9 @@ const uint8_t POT_8 = A8;
 
 int16_t valueA = 0;
 int16_t valueB = 0;
+
+uint16_t vol1 = 0;
+uint16_t vol2 = 0;
 
 uint16_t cutoff1 = 0;
 uint16_t res1 = 0;
@@ -51,12 +55,29 @@ Oscil<SIN2048_NUM_CELLS, CONTROL_RATE> filter2ResMod(SIN2048_DATA);
 // State variable filter. Potentiometers control the center frequency (i.e. cutoff) and resonance.
 StateVariable<LOWPASS> svf1;
 StateVariable<LOWPASS> svf2;
+
+ADSR<CONTROL_RATE, AUDIO_RATE> waveIn;
+ADSR<CONTROL_RATE, AUDIO_RATE> waveOut;
+
 uint8_t resonance;
 
 int16_t min = 0;
 int16_t max = 0;
 
 EventDelay blinky;
+EventDelay wave;
+EventDelay noiseChange;
+
+//int16_t cutoffA = 800;
+int16_t cutoffB = 800;
+int16_t cutoffChange = 0;
+
+enum waveState_t{
+	IDLE = 0,
+	BREAKING_IN,
+	SPREADING,
+	LEAVING,
+} waveState;
 
 void setup() {
 	Serial.begin(115200);
@@ -76,7 +97,52 @@ void setup() {
 	PORTB |= (1 << 0);
 	PORTD |= (1 << 5);
 
-	blinky.start(500);
+//	blinky.start(500);
+
+	waveState = IDLE;
+
+	wave.start(250);
+
+	noiseChange.start(3000);
+}
+
+void waveHandler(){
+	switch(waveState){
+		case IDLE:
+			if(wave.ready()){
+				waveIn.setADLevels(255, 180);
+				waveIn.setSustainLevel(180);
+				waveIn.setTimes(150, 150, 200, 2200);				
+				waveIn.noteOn();
+				waveState = BREAKING_IN;
+			}
+			break;
+		case BREAKING_IN:
+			if(!waveIn.playing()){
+				wave.start(400);
+				waveState = SPREADING;
+			}
+			break;
+		case SPREADING:
+			if(wave.ready()){
+				waveIn.setADLevels(120, 120);
+				waveIn.setSustainLevel(150);
+				waveIn.setTimes(1200, 25, 0, 2500);				
+				waveIn.noteOn();
+				waveState = LEAVING;
+			}
+
+			break;
+		case LEAVING:
+			if(!waveIn.playing()){
+				wave.start(2000);
+				waveState = IDLE;
+			}
+			break;
+		default:
+
+			break;
+	}
 }
 
 void updateControl() {
@@ -92,22 +158,36 @@ void updateControl() {
 	aNoise.setPhase(rand(BROWNNOISE8192_NUM_CELLS));
 	bNoise.setPhase(rand(PINKNOISE8192_NUM_CELLS));
 
+	// We read controls.
+	vol1 = mozziAnalogRead(POT_1);
+	vol2 = mozziAnalogRead(POT_2);
+
+	cutoff1 = mozziAnalogRead(POT_3);
+	res1 = mozziAnalogRead(POT_4);
+
+	cutoff2 = mozziAnalogRead(POT_5);
+	res2 = mozziAnalogRead(POT_6);
+	freq2 = mozziAnalogRead(POT_7);
+	amp2 = mozziAnalogRead(POT_8);
+
 //	int16_t cutoff = map(filter1CutoffMod.next(), -128, 127, 60, 180);
 	int16_t cutoff = 400;
 	// 4096 is too much, it distorts.
+
+	vol1 = map(vol1, 0, 1023, 0, 255);
+	vol2 = map(vol2, 0, 1023, 0, 255);
 
 	filter1CutoffMod.setFreq((freq1 + 1.f) / 1000.f);
 	int16_t amplitude = map(amp1, 0, 1023, 0, 1800);
 
 	cutoff = map(cutoff1, 0, 1023, 50, 4000);
 
-	cutoff += map(filter1CutoffMod.next(), -128, 127, -amplitude, amplitude);
-
-	if(cutoff < 50) cutoff = 50;
+//	cutoff += map(filter1CutoffMod.next(), -128, 127, -amplitude, amplitude);
+//	if(cutoff < 50) cutoff = 50;
 
 	int16_t resonance = 100;
 //	resonance = map(filter1ResMod.next(), -128, 127, 80, 180);
-	resonance = map(res1, 0, 1023, 10, 185);
+	resonance = map(res1, 0, 1023, 20, 185);
 
 	svf1.setResonance(resonance);
 	svf1.setCentreFreq(cutoff);
@@ -116,17 +196,27 @@ void updateControl() {
 	filter2CutoffMod.setFreq((freq2 + 1.f) / 1000.f);
 	amplitude = map(amp2, 0, 1023, 0, 1800);
 
-	cutoff = map(cutoff2, 0, 1023, 50, 4000);
+//	cutoff = map(cutoff2, 0, 1023, 50, 4000);
 
-	cutoff += map(filter2CutoffMod.next(), -128, 127, -amplitude, amplitude);
-
-	if(cutoff < 50) cutoff = 50;
+//	cutoff += map(filter2CutoffMod.next(), -128, 127, -amplitude, amplitude);
+//	if(cutoff < 50) cutoff = 50;
 
 //	resonance = map(filter1ResMod.next(), -128, 127, 80, 180);
 	resonance = map(res2, 0, 1023, 10, 185);
 
+	cutoffB += cutoffChange;
+	if(cutoffB < 50){
+		cutoffB = 50;
+		cutoffChange = rand(30);
+	} else if(cutoffB > 4000){
+		cutoffB = 4000;
+		cutoffChange = rand(30) * -1;
+	}
+
 	svf2.setResonance(resonance);
-	svf2.setCentreFreq(cutoff);
+	svf2.setCentreFreq(cutoffB);
+
+	waveIn.update();
 
 /*
 	Serial.print(valueB);
@@ -153,7 +243,14 @@ void updateControl() {
 
 	if(blinky.ready()){
 		blinky.start();
-		PORTB ^= (1 << 0);
+//		PORTB ^= (1 << 0);
+	}
+
+	waveHandler();
+
+	if(noiseChange.ready()){
+		noiseChange.start();
+		cutoffChange = rand(30) - 60;
 	}
 
 }
@@ -166,14 +263,24 @@ int updateAudio() {
 //	int ret = lpf.next((aNoise.next() + bNoise.next()) / 2);
 //	int ret = 0;
 
-	int ret;
+	int16_t ret = 0;
 	ret = svf1.next(aNoise.next()) >> 2;
-	ret += svf2.next(bNoise.next()) >> 2;
+	ret *= waveIn.next();
+	ret >>= 8;
+	ret *= vol1;
+	ret >>= 8;
+
+	int16_t ret2 = 0;
+	ret2 += svf2.next(bNoise.next()) >> 2;
+	ret2 *= vol2;
+	ret2 >>= 8;
+
+	ret += ret2;
 /*
-	if(abs(ret) > 220){
-		PORTB &= ~(1 << 0);			
+	if(abs(ret) > 200){
+		PORTD &= ~(1 << 5);
 	} else {
-		PORTB |= (1 << 0);
+		PORTD |= (1 << 5);
 	}
 */
 //	ret = aNoise.next() >> 2;
@@ -182,24 +289,13 @@ int updateAudio() {
 	if(ret < min) min = ret;
 	else if(ret > max) max = ret;
 */
-//	ret = constrain(ret, -244, 243);
+	ret = constrain(ret, -244, 243);
 
 	return ret;
 }
 
 void loop() {
 	audioHook(); // fills the audio buffer
-
-	cutoff1 = mozziAnalogRead(POT_5);
-	res1 = mozziAnalogRead(POT_2);
-	freq1 = mozziAnalogRead(POT_3);
-	amp1 = mozziAnalogRead(POT_4);
-
-	cutoff2 = mozziAnalogRead(POT_6);
-	res2 = mozziAnalogRead(POT_7);
-	freq2 = mozziAnalogRead(POT_8);
-//	amp2 = mozziAnalogRead(POT_4);
-	amp2 = 255;
 
 /*
 	Serial.print(valueA);
