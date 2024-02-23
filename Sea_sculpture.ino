@@ -28,6 +28,7 @@ const uint8_t POT_8 = A8;
 int16_t valueA = 0;
 int16_t valueB = 0;
 
+uint16_t vol = 0;
 uint16_t vol1 = 0;
 uint16_t vol2 = 0;
 
@@ -40,6 +41,11 @@ uint16_t cutoff2 = 0;
 uint16_t res2 = 0;
 uint16_t freq2 = 0;
 uint16_t amp2 = 0;
+
+uint16_t intervale = 2000;
+uint16_t varIntervale = 1000;
+uint16_t varWave1 = 50;
+uint16_t varWave2 = 800;
 
 // brown noise will be better for waves, pink noise for ambient noise.
 
@@ -110,9 +116,11 @@ void waveHandler(){
 	switch(waveState){
 		case IDLE:
 			if(wave.ready()){
+				int16_t var1 = rand(2 * varWave1) - varWave1;
+				int16_t var2 = rand(2 * varWave2) - varWave2;
 				waveIn.setADLevels(255, 180);
 				waveIn.setSustainLevel(180);
-				waveIn.setTimes(150, 150, 200, 2200);				
+				waveIn.setTimes(150 + var1, 150 + var1, 200, 2200 + var2);				
 				waveIn.noteOn();
 				waveState = BREAKING_IN;
 			}
@@ -125,9 +133,10 @@ void waveHandler(){
 			break;
 		case SPREADING:
 			if(wave.ready()){
+				int16_t var = rand(2 * varWave2) - varWave2;
 				waveIn.setADLevels(120, 120);
 				waveIn.setSustainLevel(150);
-				waveIn.setTimes(1200, 25, 0, 2500);				
+				waveIn.setTimes(1200 + var, 25, 0, 2500 + var);				
 				waveIn.noteOn();
 				waveState = LEAVING;
 			}
@@ -135,7 +144,7 @@ void waveHandler(){
 			break;
 		case LEAVING:
 			if(!waveIn.playing()){
-				wave.start(2000);
+				wave.start(intervale + rand(varIntervale) - varIntervale * 2);
 				waveState = IDLE;
 			}
 			break;
@@ -159,23 +168,28 @@ void updateControl() {
 	bNoise.setPhase(rand(PINKNOISE8192_NUM_CELLS));
 
 	// We read controls.
-	vol1 = mozziAnalogRead(POT_1);
-	vol2 = mozziAnalogRead(POT_2);
+	vol = mozziAnalogRead(POT_2);
 
 	cutoff1 = mozziAnalogRead(POT_3);
 	res1 = mozziAnalogRead(POT_4);
+	intervale = mozziAnalogRead(POT_5);
 
-	cutoff2 = mozziAnalogRead(POT_5);
-	res2 = mozziAnalogRead(POT_6);
-	freq2 = mozziAnalogRead(POT_7);
-	amp2 = mozziAnalogRead(POT_8);
+	cutoff2 = mozziAnalogRead(POT_6);
+	res2 = mozziAnalogRead(POT_7);
+	freq2 = mozziAnalogRead(POT_8);
+//	amp2 = mozziAnalogRead(POT_8);
 
 //	int16_t cutoff = map(filter1CutoffMod.next(), -128, 127, 60, 180);
 	int16_t cutoff = 400;
 	// 4096 is too much, it distorts.
 
-	vol1 = map(vol1, 0, 1023, 0, 255);
-	vol2 = map(vol2, 0, 1023, 0, 255);
+	vol1 = map(vol, 0, 1023, 0, 512);
+	vol2 = map(vol, 0, 1023, 512, 0);
+
+	if(vol1 > 255) vol1 = 255;
+	if(vol2 > 255) vol2 = 255;
+
+	intervale = map(intervale, 0, 1023, 2000, 8000);
 
 	filter1CutoffMod.setFreq((freq1 + 1.f) / 1000.f);
 	int16_t amplitude = map(amp1, 0, 1023, 0, 1800);
@@ -194,7 +208,8 @@ void updateControl() {
 
 
 	filter2CutoffMod.setFreq((freq2 + 1.f) / 1000.f);
-	amplitude = map(amp2, 0, 1023, 0, 1800);
+//	amplitude = map(amp2, 0, 1023, 0, 1800);
+	amplitude = 600;
 
 //	cutoff = map(cutoff2, 0, 1023, 50, 4000);
 
